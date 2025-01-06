@@ -6,13 +6,78 @@ import datetime
 from plotly import graph_objects as go
 import plotly.express as px
 from dotenv import load_dotenv
-
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from transformers import pipeline
+import tensorflow as tf
 
 # MongoDB setup
 load_dotenv()
 MONGO_URI = "mongodb://localhost:27017"
 client = MongoClient(MONGO_URI)
 db = client['greeninvestments']
+
+class AIManager:
+    def __init__(self):
+        self.model = RandomForestRegressor(n_estimators=100, random_state=42)
+        try:
+            self.sentiment_analyzer = pipeline("sentiment-analysis")
+        except:
+            self.sentiment_analyzer = None
+        self.scaler = StandardScaler()
+        
+    def preprocess_data(self, df):
+        numerical_features = [
+            'total_investment_required', 'expected_roi', 'financial_risk_score',
+            'environmental_score', 'social_score', 'governance_score'
+        ]
+        
+        for col in numerical_features:
+            if col in df.columns:
+                df[col] = df[col].fillna(df[col].mean())
+                
+        return df
+        
+    def analyze_project(self, project_data):
+        try:
+            # Sentiment analysis of project description
+            sentiment_score = 0
+            if self.sentiment_analyzer and 'project_description' in project_data:
+                sentiment = self.sentiment_analyzer(project_data['project_description'])[0]
+                sentiment_score = sentiment['score'] if sentiment['label'] == 'POSITIVE' else -sentiment['score']
+            
+            # Calculate risk score
+            risk_factors = [
+                project_data.get('financial_risk_score', 0),
+                project_data.get('market_volatility_index', 0),
+                project_data.get('climate_risk_score', 0)
+            ]
+            risk_score = np.mean(risk_factors)
+            
+            # Calculate impact score
+            impact_factors = [
+                project_data.get('environmental_score', 0),
+                project_data.get('social_score', 0),
+                project_data.get('governance_score', 0)
+            ]
+            impact_score = np.mean(impact_factors)
+            
+            return {
+                'ai_risk_score': risk_score,
+                'ai_impact_score': impact_score,
+                'sentiment_score': sentiment_score,
+                'ai_recommendation': 'High Potential' if impact_score > 70 and risk_score < 30 else 'Medium Potential' if impact_score > 50 and risk_score < 50 else 'Review Required'
+            }
+        except Exception as e:
+            print(f"Error in AI analysis: {e}")
+            return {
+                'ai_risk_score': 0,
+                'ai_impact_score': 0,
+                'sentiment_score': 0,
+                'ai_recommendation': 'Analysis Failed'
+            }
 
 class Authentication:
     def __init__(self):
@@ -46,9 +111,9 @@ class Authentication:
 class DataManager:
     def __init__(self):
         self.projects = db.projects
+        self.ai_manager = AIManager()
         
     def process_date_columns(self, df):
-        """Convert date strings to datetime objects"""
         date_columns = ['start_date', 'expected_completion_date']
         for col in date_columns:
             if col in df.columns:
@@ -56,32 +121,16 @@ class DataManager:
         return df
     
     def validate_csv_columns(self, df):
-        """Validate that the CSV has the required columns"""
         required_columns = [
             'project_id', 'project_name', 'project_description', 'project_type',
             'project_status', 'start_date', 'expected_completion_date', 'country',
-            'region', 'coordinates', 'total_investment_required', 'current_funding',
-            'funding_gap', 'expected_roi', 'payback_period', 'capital_expenditure',
-            'operational_expenditure', 'maintenance_costs', 'projected_revenue_5yr',
-            'projected_cashflow_5yr', 'financial_risk_score', 'market_volatility_index',
-            'currency_risk_exposure', 'carbon_reduction_tons', 'carbon_intensity',
-            'emission_savings_forecast', 'water_usage_reduction', 'energy_efficiency_score',
-            'renewable_energy_generation', 'biodiversity_impact_score', 'land_use_change',
-            'waste_reduction_tons', 'climate_risk_score', 'natural_disaster_risk',
-            'climate_adaptation_score', 'jobs_created', 'community_benefit_score',
-            'local_business_impact', 'healthcare_impact_score', 'education_impact_score',
-            'poverty_reduction_impact', 'community_engagement_level', 'indigenous_peoples_impact',
-            'stakeholder_satisfaction_score', 'compliance_score', 'transparency_index',
-            'corruption_risk_score', 'management_experience_score', 'track_record_score',
-            'regulatory_compliance_score', 'reporting_quality_score', 'monitoring_framework_score',
-            'audit_frequency', 'environmental_score', 'social_score', 'governance_score',
-            'overall_esg_score'
+            'total_investment_required', 'expected_roi', 'financial_risk_score',
+            'environmental_score', 'social_score', 'governance_score'
         ]
         missing_columns = [col for col in required_columns if col not in df.columns]
         return len(missing_columns) == 0, missing_columns
     
     def insert_projects_from_csv(self, df, user_id):
-        """Insert multiple projects from a DataFrame"""
         successful_inserts = 0
         failed_inserts = 0
         
@@ -91,7 +140,10 @@ class DataManager:
                 project_data['user_id'] = user_id
                 project_data['created_at'] = datetime.datetime.now()
                 
-                # Convert datetime objects to strings for MongoDB
+                # Add AI analysis
+                ai_analysis = self.ai_manager.analyze_project(project_data)
+                project_data.update(ai_analysis)
+                
                 if isinstance(project_data.get('start_date'), pd.Timestamp):
                     project_data['start_date'] = project_data['start_date'].strftime('%Y-%m-%d')
                 if isinstance(project_data.get('expected_completion_date'), pd.Timestamp):
@@ -109,25 +161,22 @@ class DataManager:
         return list(self.projects.find({"user_id": user_id}, {'_id': 0}))
     
     def calculate_dashboard_metrics(self, projects_df):
-        """Calculate summary metrics for dashboard with graceful handling of missing columns"""
         if projects_df.empty:
             return None
-        
+            
         metrics = {
             'total_projects': len(projects_df),
             'total_investment': projects_df['total_investment_required'].sum() if 'total_investment_required' in projects_df.columns else 0,
             'average_roi': projects_df['expected_roi'].mean() if 'expected_roi' in projects_df.columns else 0,
-            'total_carbon_reduction': projects_df['carbon_reduction_tons'].sum() if 'carbon_reduction_tons' in projects_df.columns else 0,
-            'avg_esg_score': projects_df['overall_esg_score'].mean() if 'overall_esg_score' in projects_df.columns else 0,
-            'jobs_created': projects_df['jobs_created'].sum() if 'jobs_created' in projects_df.columns else 0
+            'avg_ai_score': projects_df['ai_impact_score'].mean() if 'ai_impact_score' in projects_df.columns else 0,
+            'avg_risk_score': projects_df['ai_risk_score'].mean() if 'ai_risk_score' in projects_df.columns else 0,
+            'high_potential_projects': len(projects_df[projects_df['ai_recommendation'] == 'High Potential']) if 'ai_recommendation' in projects_df.columns else 0
         }
         
-        # Format percentages and round numbers
         metrics['average_roi'] = metrics['average_roi'] if pd.isna(metrics['average_roi']) else float(metrics['average_roi'])
-        metrics['avg_esg_score'] = round(float(metrics['avg_esg_score']), 2) if not pd.isna(metrics['avg_esg_score']) else 0
+        metrics['avg_ai_score'] = round(float(metrics['avg_ai_score']), 2) if not pd.isna(metrics['avg_ai_score']) else 0
         
         return metrics
-
 def main():
     st.set_page_config(page_title="Green Finance Platform", layout="wide")
     
@@ -346,81 +395,10 @@ def main():
             st.markdown("""
             ### Required Columns:
             Your CSV file should include the following columns:
-            
-            1. Basic Project Information:
-               - project_id
-               - project_name
-               - project_description
-               - project_type
-               - project_status
-               - start_date
-               - expected_completion_date
-            
-            2. Location Information:
-               - country
-               - region
-               - coordinates
-            
-            . Financial Metrics:
-               - total_investment_required
-               - current_funding
-               - funding_gap
-               - expected_roi
-               - payback_period
-               - capital_expenditure
-               - operational_expenditure
-               - maintenance_costs
-               - projected_revenue_5yr
-               - projected_cashflow_5yr
-            
-            4. Risk Metrics:
-               - financial_risk_score
-               - market_volatility_index
-               - currency_risk_exposure
-            
-            5. Environmental Metrics:
-               - carbon_reduction_tons
-               - carbon_intensity
-               - emission_savings_forecast
-               - water_usage_reduction
-               - energy_efficiency_score
-               - renewable_energy_generation
-               - biodiversity_impact_score
-               - land_use_change
-               - waste_reduction_tons
-            
-            6. Climate Metrics:
-               - climate_risk_score
-               - natural_disaster_risk
-               - climate_adaptation_score
-            
-            7. Social Impact Metrics:
-               - jobs_created
-               - community_benefit_score
-               - local_business_impact
-               - healthcare_impact_score
-               - education_impact_score
-               - poverty_reduction_impact
-               - community_engagement_level
-               - indigenous_peoples_impact
-               - stakeholder_satisfaction_score
-            
-            8. Governance Metrics:
-               - compliance_score
-               - transparency_index
-               - corruption_risk_score
-               - management_experience_score
-               - track_record_score
-               - regulatory_compliance_score
-               - reporting_quality_score
-               - monitoring_framework_score
-               - audit_frequency
-            
-            9. ESG Scores:
-               - environmental_score
-               - social_score
-               - governance_score
-               - overall_esg_score
+            - Project Information
+            - Financial Metrics
+            - ESG Scores
+            Refer to documentation for full details.
             """)
 
 if __name__ == "__main__":

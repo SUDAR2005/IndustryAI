@@ -1,12 +1,21 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from pymongo import MongoClient
 import bcrypt
 import datetime
 from plotly import graph_objects as go
 import plotly.express as px
 from dotenv import load_dotenv
-
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestRegressor, IsolationForest
+from sklearn.decomposition import PCA
+from sklearn.cluster import KMeans
+from transformers import pipeline
+from scipy.optimize import minimize
+import tensorflow as tf
+import warnings
+warnings.filterwarnings('ignore')
 
 # MongoDB setup
 load_dotenv()
@@ -43,10 +52,227 @@ class Authentication:
             return True, user
         return False, None
 
+class MLManager:
+    def __init__(self):
+        try:
+            self.sentiment_analyzer = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+        except Exception as e:
+            print(f"Warning: Sentiment analyzer initialization failed: {e}")
+            self.sentiment_analyzer = None
+        self.scaler = StandardScaler()
+        self.pca = PCA(n_components=3)
+        self.anomaly_detector = IsolationForest(contamination=0.1, random_state=42)
+        self.project_scorer = RandomForestRegressor(random_state=42)
+        
+    def preprocess_data(self, df):
+        """Preprocess numerical features for ML models"""
+        numerical_columns = [
+            'total_investment_required', 'expected_roi', 'financial_risk_score',
+            'carbon_reduction_tons', 'energy_efficiency_score', 'jobs_created',
+            'community_benefit_score', 'environmental_score', 'social_score',
+            'governance_score', 'overall_esg_score'
+        ]
+        
+        # Handle missing values
+        for col in numerical_columns:
+            if col in df.columns:
+                df[col] = df[col].fillna(df[col].mean())
+        
+        # Ensure all required columns exist
+        for col in numerical_columns:
+            if col not in df.columns:
+                df[col] = 0
+        
+        return df[numerical_columns]
+    
+    def analyze_project_description(self, description):
+        """Use NLP to analyze project descriptions"""
+        if self.sentiment_analyzer is None:
+            return {'sentiment_score': 0, 'confidence': 0}
+            
+        try:
+            sentiment = self.sentiment_analyzer(description)[0]
+            sentiment_score = sentiment['score'] if sentiment['label'] == 'POSITIVE' else -sentiment['score']
+            return {
+                'sentiment_score': sentiment_score,
+                'confidence': sentiment['score']
+            }
+        except Exception as e:
+            print(f"Error in sentiment analysis: {e}")
+            return {'sentiment_score': 0, 'confidence': 0}
+    
+    def calculate_project_score(self, df):
+        """Calculate ML-based project scores and feature importance"""
+        try:
+            X = self.preprocess_data(df)
+            
+            # Scale the features
+            X_scaled = self.scaler.fit_transform(X)
+            X_scaled_df = pd.DataFrame(X_scaled, columns=X.columns)
+            
+            # If we have ESG scores, use them as target, otherwise create a composite score
+            if 'overall_esg_score' in df.columns:
+                y = df['overall_esg_score']
+            else:
+                y = (X_scaled_df['expected_roi'] * 0.3 + 
+                     X_scaled_df['environmental_score'] * 0.3 +
+                     X_scaled_df['social_score'] * 0.2 +
+                     X_scaled_df['governance_score'] * 0.2)
+            
+            # Train the model
+            self.project_scorer.fit(X_scaled, y)
+            
+            # Generate project scores
+            project_scores = self.project_scorer.predict(X_scaled)
+            
+            # Calculate feature importance
+            feature_importance = dict(zip(X.columns, self.project_scorer.feature_importances_))
+            
+            return project_scores, feature_importance
+            
+        except Exception as e:
+            print(f"Error in calculate_project_score: {e}")
+            default_scores = np.zeros(len(df))
+            default_importance = {col: 0 for col in self.preprocess_data(df).columns}
+            return default_scores, default_importance
+    
+    def detect_anomalies(self, df):
+        """Detect anomalous projects using Isolation Forest"""
+        try:
+            X = self.preprocess_data(df)
+            X_scaled = self.scaler.fit_transform(X)
+            anomaly_scores = self.anomaly_detector.fit_predict(X_scaled)
+            return anomaly_scores
+        except Exception as e:
+            print(f"Error in anomaly detection: {e}")
+            return np.ones(len(df))
+    
+    def optimize_portfolio(self, df, budget_constraint, risk_tolerance):
+        """Optimize investment portfolio using ML insights"""
+        try:
+            # Ensure we have required columns
+            required_columns = ['expected_roi', 'total_investment_required', 'overall_esg_score']
+            if not all(col in df.columns for col in required_columns):
+                print("Missing required columns for portfolio optimization")
+                return np.array([1/len(df)] * len(df))
+            
+            n_projects = len(df)
+            
+            # Extract required arrays
+            expected_roi = np.array(df['expected_roi'].values)
+            total_investment = np.array(df['total_investment_required'].values)
+            esg_scores = np.array(df['overall_esg_score'].values)
+            
+            # Calculate covariance matrix using only relevant financial metrics
+            financial_columns = [
+                'expected_roi',
+                'financial_risk_score',
+                'market_volatility_index',
+                'currency_risk_exposure'
+            ]
+            
+            # Filter for available financial columns
+            available_financial_columns = [col for col in financial_columns if col in df.columns]
+            if not available_financial_columns:
+                # If no financial columns are available, use identity matrix
+                correlations = np.eye(n_projects)
+            else:
+                # Calculate correlation matrix using available financial columns
+                financial_data = df[available_financial_columns]
+                correlations = financial_data.corr().fillna(0).values
+                
+                # If correlation matrix is not square or wrong size, use identity matrix
+                if correlations.shape != (n_projects, n_projects):
+                    correlations = np.eye(n_projects)
+                    
+            def objective(weights):
+                weights = np.array(weights)
+                try:
+                    portfolio_return = np.sum(weights * expected_roi)
+                    portfolio_risk = np.sqrt(weights.T @ correlations @ weights)
+                    esg_impact = np.sum(weights * esg_scores)
+                    return -(portfolio_return + esg_impact - risk_tolerance * portfolio_risk)
+                except Exception as e:
+                    print(f"Error in objective function: {e}")
+                    return np.inf
+
+            constraints = [
+                {'type': 'eq', 'fun': lambda x: np.sum(x) - 1},
+                {'type': 'ineq', 'fun': lambda x: budget_constraint - np.sum(x * total_investment)}
+            ]
+            
+            bounds = tuple((0, 1) for _ in range(n_projects))
+            initial_weights = np.array([1/n_projects] * n_projects)
+            
+            result = minimize(
+                objective,
+                initial_weights,
+                method='SLSQP',
+                constraints=constraints,
+                bounds=bounds,
+                options={'ftol': 1e-8, 'maxiter': 1000}
+            )
+            
+            if result.success:
+                weights = np.maximum(result.x, 0)
+                weights = weights / np.sum(weights)
+                return weights
+            else:
+                print(f"Optimization failed: {result.message}")
+                return initial_weights
+                
+        except Exception as e:
+            print(f"Portfolio optimization failed: {e}")
+            return np.array([1/len(df)] * len(df)) 
+    
+    def cluster_projects(self, df):
+        """Cluster projects based on their characteristics"""
+        try:
+            X = self.preprocess_data(df)
+            X_scaled = self.scaler.fit_transform(X)
+            X_pca = self.pca.fit_transform(X_scaled)
+            
+            n_clusters = min(5, len(df))
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+            clusters = kmeans.fit_predict(X_pca)
+            
+            return clusters, X_pca
+            
+        except Exception as e:
+            print(f"Clustering failed: {e}")
+            return np.zeros(len(df)), np.zeros((len(df), 3))
 class DataManager:
     def __init__(self):
         self.projects = db.projects
+        self.ml_manager = MLManager()
+    
+    def get_user_projects(self, user_id):
+        """
+        Retrieve all projects for a specific user
         
+        Parameters:
+        user_id (str): The ID of the user whose projects to retrieve
+        
+        Returns:
+        list: List of project dictionaries
+        """
+        try:
+            # Convert MongoDB cursor to list and exclude MongoDB _id field
+            projects = list(self.projects.find(
+                {"user_id": user_id},
+                {'_id': 0}  # Exclude MongoDB _id field
+            ))
+            
+            # Handle case where no projects are found
+            if not projects:
+                return []
+                
+            return projects
+            
+        except Exception as e:
+            print(f"Error retrieving user projects: {e}")
+            return []
+    
     def process_date_columns(self, df):
         """Convert date strings to datetime objects"""
         date_columns = ['start_date', 'expected_completion_date']
@@ -105,28 +331,135 @@ class DataManager:
         
         return successful_inserts, failed_inserts
     
-    def get_user_projects(self, user_id):
-        return list(self.projects.find({"user_id": user_id}, {'_id': 0}))
-    
     def calculate_dashboard_metrics(self, projects_df):
-        """Calculate summary metrics for dashboard with graceful handling of missing columns"""
+        """Enhanced dashboard metrics with ML insights"""
         if projects_df.empty:
             return None
         
-        metrics = {
-            'total_projects': len(projects_df),
-            'total_investment': projects_df['total_investment_required'].sum() if 'total_investment_required' in projects_df.columns else 0,
-            'average_roi': projects_df['expected_roi'].mean() if 'expected_roi' in projects_df.columns else 0,
-            'total_carbon_reduction': projects_df['carbon_reduction_tons'].sum() if 'carbon_reduction_tons' in projects_df.columns else 0,
-            'avg_esg_score': projects_df['overall_esg_score'].mean() if 'overall_esg_score' in projects_df.columns else 0,
-            'jobs_created': projects_df['jobs_created'].sum() if 'jobs_created' in projects_df.columns else 0
-        }
+        try:
+            # Basic metrics
+            basic_metrics = {
+                'total_projects': len(projects_df),
+                'total_investment': projects_df['total_investment_required'].sum(),
+                'average_roi': projects_df['expected_roi'].mean(),
+                'total_carbon_reduction': projects_df['carbon_reduction_tons'].sum(),
+                'avg_esg_score': projects_df['overall_esg_score'].mean(),
+                'jobs_created': projects_df['jobs_created'].sum()
+            }
+    
+            ml_scores, feature_importance = self.ml_manager.calculate_project_score(projects_df)
+            anomaly_scores = self.ml_manager.detect_anomalies(projects_df)
+            anomaly_count = sum(anomaly_scores == -1)
+            
+            optimal_weights = self.ml_manager.optimize_portfolio(
+                projects_df,
+                budget_constraint=basic_metrics['total_investment'] * 1.2,  # 20% buffer
+                risk_tolerance=0.5
+            )
+            
+            clusters, pca_components = self.ml_manager.cluster_projects(projects_df)
+            
+            # Add ML metrics
+            ml_metrics = {
+                'avg_project_score': float(np.mean(ml_scores)),
+                'ml_scores': ml_scores.tolist(),
+                'feature_importance': feature_importance,
+                'top_feature': max(feature_importance.items(), key=lambda x: x[1])[0],
+                'anomaly_count': int(anomaly_count),
+                'optimal_allocation': optimal_weights.tolist(),
+                'cluster_assignments': clusters.tolist(),
+                'pca_components': pca_components.tolist()
+            }
+            
+            return {**basic_metrics, **ml_metrics}
+            
+        except Exception as e:
+            print(f"Error calculating metrics: {e}")
+            # Return basic metrics if ML metrics fail
+            return {
+                'total_projects': len(projects_df),
+                'total_investment': projects_df['total_investment_required'].sum(),
+                'average_roi': projects_df['expected_roi'].mean(),
+                'total_carbon_reduction': projects_df['carbon_reduction_tons'].sum(),
+                'avg_esg_score': projects_df['overall_esg_score'].mean(),
+                'jobs_created': projects_df['jobs_created'].sum()
+            }
+def display_ml_dashboard(df, metrics):
+        """Display ML-enhanced dashboard"""
+        print("Hello All")
+        try:
+            # Basic metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Investment", f"${metrics['total_investment']:,.2f}")
+                if 'total_carbon_reduction' in metrics:
+                    st.metric("Total Carbon Reduction", f"{metrics['total_carbon_reduction']:,.0f} tons")
+            with col2:
+                st.metric("Average ROI", f"{metrics['average_roi']:.1%}")
+                if 'avg_esg_score' in metrics:
+                    st.metric("Average ESG Score", f"{metrics['avg_esg_score']:.2f}")
+            with col3:
+                st.metric("Total Projects", metrics['total_projects'])
+                if 'jobs_created' in metrics:
+                    st.metric("Jobs Created", f"{metrics['jobs_created']:,.0f}")
+            
+            # Only show ML visualizations if ML metrics are available
+            if 'ml_scores' in metrics:
+                # Project clusters visualization
+                st.subheader("Project Clustering Analysis")
+                pca_df = pd.DataFrame(
+                    metrics['pca_components'], 
+                    columns=['PC1', 'PC2', 'PC3']
+                )
+                pca_df['Cluster'] = metrics['cluster_assignments']
+                
+                fig_clusters = px.scatter_3d(
+                    pca_df, x='PC1', y='PC2', z='PC3',
+                    color='Cluster', title="Project Clusters in 3D Space"
+                )
+                st.plotly_chart(fig_clusters)
+                
+                # Portfolio optimization visualization
+                if 'optimal_allocation' in metrics:
+                    st.subheader("Optimal Portfolio Allocation")
+                    allocation_df = pd.DataFrame({
+                        'Project': df['project_name'],
+                        'Optimal Weight': metrics['optimal_allocation']
+                    })
+                    fig_allocation = px.bar(
+                        allocation_df, x='Project', y='Optimal Weight',
+                        title="Recommended Investment Distribution"
+                    )
+                    st.plotly_chart(fig_allocation)
+                    
+                # # Project scores distribution
+                # st.subheader("ML-Based Project Scores")
+                # fig_scores = px.histogram(
+                #     pd.DataFrame({'ML Score': metrics['ml_scores']}), x='ML Score',
+                #     title="Distribution of Project Scores"
+                # )
+                # st.plotly_chart(fig_scores)
+                
+                # Feature importance
+                if 'feature_importance' in metrics:
+                    st.subheader("Feature Importance in Project Evaluation")
+                    importance_df = pd.DataFrame({
+                        'Feature': list(metrics['feature_importance'].keys()),
+                        'Importance': list(metrics['feature_importance'].values())
+                    }).sort_values('Importance', ascending=False)
+                    
+                    fig_importance = px.bar(
+                        importance_df, x='Feature', y='Importance',
+                        title="Feature Importance in Project Evaluation"
+                    )
+                    st.plotly_chart(fig_importance)
         
-        # Format percentages and round numbers
-        metrics['average_roi'] = metrics['average_roi'] if pd.isna(metrics['average_roi']) else float(metrics['average_roi'])
-        metrics['avg_esg_score'] = round(float(metrics['avg_esg_score']), 2) if not pd.isna(metrics['avg_esg_score']) else 0
-        
-        return metrics
+        except Exception as e:
+            st.error(f"Error displaying dashboard: {e}")
+            # Display basic metrics as fallback
+            st.metric("Total Projects", metrics['total_projects'])
+            st.metric("Total Investment", f"${metrics['total_investment']:,.2f}")
+            st.metric("Average ROI", f"{metrics['average_roi']:.1%}")
 
 def main():
     st.set_page_config(page_title="Green Finance Platform", layout="wide")
@@ -142,7 +475,6 @@ def main():
     auth = Authentication()
     data_manager = DataManager()
     
-    # Authentication Page
     if st.session_state.page == 'auth':
         st.title("Green Finance Platform")
         tab1, tab2 = st.tabs(["Login", "Signup"])
@@ -215,7 +547,6 @@ def main():
         else:
             st.info("No projects found. Start by adding some projects in the Update Database section.")
     
-    # Dashboard Page
     elif st.session_state.page == 'dashboard':
         st.title("Dashboard")
         
@@ -236,23 +567,14 @@ def main():
         
         # Dashboard content
         projects = data_manager.get_user_projects(st.session_state.user_id)
+        
         if projects:
             df = pd.DataFrame(projects)
             metrics = data_manager.calculate_dashboard_metrics(df)
             
-            # Metrics Overview
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Investment", f"${metrics['total_investment']:,.2f}")
-                st.metric("Total Carbon Reduction", f"{metrics['total_carbon_reduction']:,.0f} tons")
-            with col2:
-                st.metric("Average ROI", f"{metrics['average_roi']:.1%}")
-                st.metric("Average ESG Score", f"{metrics['avg_esg_score']:.2f}")
-            with col3:
-                st.metric("Total Projects", metrics['total_projects'])
-                st.metric("Jobs Created", f"{metrics['jobs_created']:,.0f}")
-            
-            # Visualizations
+            # Call the ML dashboard display function
+            display_ml_dashboard(df, metrics)
+            # Additional visualizations (if needed)
             st.subheader("Investment by Project Type")
             fig1 = px.bar(df, x='project_type', y='total_investment_required',
                          title="Investment Distribution by Project Type")
@@ -281,7 +603,7 @@ def main():
             
         else:
             st.info("No projects found. Start by adding some projects in the Update Database section.")
-    
+            
     # Update Database Page
     elif st.session_state.page == 'update_data':
         st.title("Update Database")

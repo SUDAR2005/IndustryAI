@@ -1,0 +1,12 @@
+mongodb:
+  uri: "http://localhost:27017"
+  db_name: "greeninvestments"
+
+security:
+  secret_key: "your-secret-key-here"
+  token_expiry: 3600
+
+app:
+  name: "Green Finance Platform"
+  version: "1.0.0"
+  debug: true
