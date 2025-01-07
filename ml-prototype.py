@@ -241,6 +241,7 @@ class MLManager:
         except Exception as e:
             print(f"Clustering failed: {e}")
             return np.zeros(len(df)), np.zeros((len(df), 3))
+        
 class DataManager:
     def __init__(self):
         self.projects = db.projects
@@ -462,7 +463,7 @@ def display_ml_dashboard(df, metrics):
             st.metric("Average ROI", f"{metrics['average_roi']:.1%}")
 
 def main():
-    st.set_page_config(page_title="Green Finance Platform", layout="wide")
+    st.set_page_config(page_title="Green Finance Optimization Platform 💵💹", layout="wide")
     
     # Initialize session state
     if 'page' not in st.session_state:
@@ -476,7 +477,7 @@ def main():
     data_manager = DataManager()
     
     if st.session_state.page == 'auth':
-        st.title("Green Finance Platform")
+        st.title("Green Finance Optimization Platform")
         tab1, tab2 = st.tabs(["Login", "Signup"])
         
         with tab1:
@@ -683,7 +684,7 @@ def main():
                - region
                - coordinates
             
-            . Financial Metrics:
+            3. Financial Metrics:
                - total_investment_required
                - current_funding
                - funding_gap
