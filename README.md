@@ -33,8 +33,8 @@ The Green Finance Optimization Platform is a machine learning-powered web applic
 ### Steps
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
-   cd <repository-folder>
+   git clone IndustryAi
+   cd IndustryAi
    ```
 2. Create a virtual environment and activate it:
    ```bash
@@ -64,25 +64,4 @@ The Green Finance Optimization Platform is a machine learning-powered web applic
    - Ensure the file matches the required format (see CSV format information in the app).
 4. **Portfolio Optimization**: Optimize investment allocation with machine learning insights.
 
-## File Structure
-- `ml-prototype.py`: Main application script.
-- `requirements.txt`: Python dependencies.
-
-## Contributing
-1. Fork the repository.
-2. Create a new branch:
-   ```bash
-   git checkout -b feature-branch
-   ```
-3. Commit your changes:
-   ```bash
-   git commit -m "Add new feature"
-   ```
-4. Push to your branch and submit a pull request.
-
-## License
-This project is licensed under the MIT License. See `LICENSE` for details.
-
-## Contact
-For questions or support, please contact [your-email@example.com].
 
