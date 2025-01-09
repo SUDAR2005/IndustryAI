@@ -17,7 +17,6 @@ import tensorflow as tf
 import warnings
 warnings.filterwarnings('ignore')
 
-# MongoDB setup
 load_dotenv()
 MONGO_URI = "mongodb://localhost:27017"
 client = MongoClient(MONGO_URI)
@@ -73,12 +72,10 @@ class MLManager:
             'governance_score', 'overall_esg_score'
         ]
         
-        # Handle missing values
         for col in numerical_columns:
             if col in df.columns:
                 df[col] = df[col].fillna(df[col].mean())
         
-        # Ensure all required columns exist
         for col in numerical_columns:
             if col not in df.columns:
                 df[col] = 0
@@ -106,11 +103,9 @@ class MLManager:
         try:
             X = self.preprocess_data(df)
             
-            # Scale the features
             X_scaled = self.scaler.fit_transform(X)
             X_scaled_df = pd.DataFrame(X_scaled, columns=X.columns)
             
-            # If we have ESG scores, use them as target, otherwise create a composite score
             if 'overall_esg_score' in df.columns:
                 y = df['overall_esg_score']
             else:
@@ -119,13 +114,10 @@ class MLManager:
                      X_scaled_df['social_score'] * 0.2 +
                      X_scaled_df['governance_score'] * 0.2)
             
-            # Train the model
             self.project_scorer.fit(X_scaled, y)
             
-            # Generate project scores
             project_scores = self.project_scorer.predict(X_scaled)
             
-            # Calculate feature importance
             feature_importance = dict(zip(X.columns, self.project_scorer.feature_importances_))
             
             return project_scores, feature_importance
@@ -150,7 +142,6 @@ class MLManager:
     def optimize_portfolio(self, df, budget_constraint, risk_tolerance):
         """Optimize investment portfolio using ML insights"""
         try:
-            # Ensure we have required columns
             required_columns = ['expected_roi', 'total_investment_required', 'overall_esg_score']
             if not all(col in df.columns for col in required_columns):
                 print("Missing required columns for portfolio optimization")
@@ -158,12 +149,10 @@ class MLManager:
             
             n_projects = len(df)
             
-            # Extract required arrays
             expected_roi = np.array(df['expected_roi'].values)
             total_investment = np.array(df['total_investment_required'].values)
             esg_scores = np.array(df['overall_esg_score'].values)
             
-            # Calculate covariance matrix using only relevant financial metrics
             financial_columns = [
                 'expected_roi',
                 'financial_risk_score',
@@ -171,17 +160,13 @@ class MLManager:
                 'currency_risk_exposure'
             ]
             
-            # Filter for available financial columns
             available_financial_columns = [col for col in financial_columns if col in df.columns]
             if not available_financial_columns:
-                # If no financial columns are available, use identity matrix
                 correlations = np.eye(n_projects)
             else:
-                # Calculate correlation matrix using available financial columns
                 financial_data = df[available_financial_columns]
                 correlations = financial_data.corr().fillna(0).values
                 
-                # If correlation matrix is not square or wrong size, use identity matrix
                 if correlations.shape != (n_projects, n_projects):
                     correlations = np.eye(n_projects)
                     
@@ -258,13 +243,10 @@ class DataManager:
         list: List of project dictionaries
         """
         try:
-            # Convert MongoDB cursor to list and exclude MongoDB _id field
             projects = list(self.projects.find(
                 {"user_id": user_id},
-                {'_id': 0}  # Exclude MongoDB _id field
-            ))
+                {'_id': 0}  ))
             
-            # Handle case where no projects are found
             if not projects:
                 return []
                 
@@ -318,7 +300,6 @@ class DataManager:
                 project_data['user_id'] = user_id
                 project_data['created_at'] = datetime.datetime.now()
                 
-                # Convert datetime objects to strings for MongoDB
                 if isinstance(project_data.get('start_date'), pd.Timestamp):
                     project_data['start_date'] = project_data['start_date'].strftime('%Y-%m-%d')
                 if isinstance(project_data.get('expected_completion_date'), pd.Timestamp):
@@ -338,7 +319,6 @@ class DataManager:
             return None
         
         try:
-            # Basic metrics
             basic_metrics = {
                 'total_projects': len(projects_df),
                 'total_investment': projects_df['total_investment_required'].sum(),
@@ -354,13 +334,12 @@ class DataManager:
             
             optimal_weights = self.ml_manager.optimize_portfolio(
                 projects_df,
-                budget_constraint=basic_metrics['total_investment'] * 1.2,  # 20% buffer
+                budget_constraint=basic_metrics['total_investment'] * 1.2,  
                 risk_tolerance=0.5
             )
             
             clusters, pca_components = self.ml_manager.cluster_projects(projects_df)
             
-            # Add ML metrics
             ml_metrics = {
                 'avg_project_score': float(np.mean(ml_scores)),
                 'ml_scores': ml_scores.tolist(),
@@ -376,7 +355,6 @@ class DataManager:
             
         except Exception as e:
             print(f"Error calculating metrics: {e}")
-            # Return basic metrics if ML metrics fail
             return {
                 'total_projects': len(projects_df),
                 'total_investment': projects_df['total_investment_required'].sum(),
@@ -389,7 +367,6 @@ def display_ml_dashboard(df, metrics):
         """Display ML-enhanced dashboard"""
         print("Hello All")
         try:
-            # Basic metrics
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Total Investment", f"${metrics['total_investment']:,.2f}")
@@ -404,9 +381,7 @@ def display_ml_dashboard(df, metrics):
                 if 'jobs_created' in metrics:
                     st.metric("Jobs Created", f"{metrics['jobs_created']:,.0f}")
             
-            # Only show ML visualizations if ML metrics are available
             if 'ml_scores' in metrics:
-                # Project clusters visualization
                 st.subheader("Project Clustering Analysis")
                 pca_df = pd.DataFrame(
                     metrics['pca_components'], 
@@ -420,7 +395,6 @@ def display_ml_dashboard(df, metrics):
                 )
                 st.plotly_chart(fig_clusters)
                 
-                # Portfolio optimization visualization
                 if 'optimal_allocation' in metrics:
                     st.subheader("Optimal Portfolio Allocation")
                     allocation_df = pd.DataFrame({
@@ -433,15 +407,7 @@ def display_ml_dashboard(df, metrics):
                     )
                     st.plotly_chart(fig_allocation)
                     
-                # # Project scores distribution
-                # st.subheader("ML-Based Project Scores")
-                # fig_scores = px.histogram(
-                #     pd.DataFrame({'ML Score': metrics['ml_scores']}), x='ML Score',
-                #     title="Distribution of Project Scores"
-                # )
-                # st.plotly_chart(fig_scores)
-                
-                # Feature importance
+                                
                 if 'feature_importance' in metrics:
                     st.subheader("Feature Importance in Project Evaluation")
                     importance_df = pd.DataFrame({
@@ -457,7 +423,6 @@ def display_ml_dashboard(df, metrics):
         
         except Exception as e:
             st.error(f"Error displaying dashboard: {e}")
-            # Display basic metrics as fallback
             st.metric("Total Projects", metrics['total_projects'])
             st.metric("Total Investment", f"${metrics['total_investment']:,.2f}")
             st.metric("Average ROI", f"{metrics['average_roi']:.1%}")
@@ -465,7 +430,6 @@ def display_ml_dashboard(df, metrics):
 def main():
     st.set_page_config(page_title="Green Finance Optimization Platform 💵💹", layout="wide")
     
-    # Initialize session state
     if 'page' not in st.session_state:
         st.session_state.page = 'auth'
     if 'user_id' not in st.session_state:
@@ -506,11 +470,9 @@ def main():
                 else:
                     st.error(message)
     
-    # Home Page
     elif st.session_state.page == 'home':
         st.title(f"Welcome, {st.session_state.username}!")
         
-        # Sidebar for navigation
         with st.sidebar:
             st.title("Navigation")
             if st.button("Dashboard"):
@@ -525,7 +487,6 @@ def main():
                 st.session_state.username = None
                 st.rerun()
         
-        # Main content area
         st.header("Quick Overview")
         projects = data_manager.get_user_projects(st.session_state.user_id)
         if projects:
@@ -540,7 +501,6 @@ def main():
             with col3:
                 st.metric("Average ROI", f"{metrics['average_roi']:.1%}")
             
-            # Quick visualization
             st.subheader("Project Types Distribution")
             fig = px.pie(df, names='project_type', title="Projects by Type")
             st.plotly_chart(fig)
@@ -551,7 +511,6 @@ def main():
     elif st.session_state.page == 'dashboard':
         st.title("Dashboard")
         
-        # Sidebar navigation
         with st.sidebar:
             st.title("Navigation")
             if st.button("Home"):
@@ -566,16 +525,13 @@ def main():
                 st.session_state.username = None
                 st.rerun()
         
-        # Dashboard content
         projects = data_manager.get_user_projects(st.session_state.user_id)
         
         if projects:
             df = pd.DataFrame(projects)
             metrics = data_manager.calculate_dashboard_metrics(df)
             
-            # Call the ML dashboard display function
             display_ml_dashboard(df, metrics)
-            # Additional visualizations (if needed)
             st.subheader("Investment by Project Type")
             fig1 = px.bar(df, x='project_type', y='total_investment_required',
                          title="Investment Distribution by Project Type")
@@ -596,7 +552,6 @@ def main():
                                 title="Risk vs Return Analysis")
                 st.plotly_chart(fig3)
             
-            # Project Details Table
             st.subheader("Project Details")
             display_columns = ['project_name', 'project_type', 'total_investment_required',
                              'expected_roi', 'overall_esg_score', 'project_status']
@@ -605,11 +560,9 @@ def main():
         else:
             st.info("No projects found. Start by adding some projects in the Update Database section.")
             
-    # Update Database Page
     elif st.session_state.page == 'update_data':
         st.title("Update Database")
         
-        # Sidebar navigation
         with st.sidebar:
             st.title("Navigation")
             if st.button("Home"):
@@ -624,30 +577,24 @@ def main():
                 st.session_state.username = None
                 st.rerun()
         
-        # CSV Upload Section
         st.header("Upload Projects Data")
         uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
         
         if uploaded_file is not None:
             try:
-                # Read CSV file
                 df = pd.read_csv(uploaded_file)
                 
-                # Validate columns
                 is_valid, missing_columns = data_manager.validate_csv_columns(df)
                 
                 if not is_valid:
                     st.error(f"Missing required columns: {', '.join(missing_columns)}")
                     st.stop()
                 
-                # Process dates
                 df = data_manager.process_date_columns(df)
                 
-                # Preview the data
                 st.subheader("Data Preview")
                 st.dataframe(df.head())
                 
-                # Upload button
                 if st.button("Upload to Database"):
                     with st.spinner("Uploading projects..."):
                         successful, failed = data_manager.insert_projects_from_csv(df, st.session_state.user_id)
@@ -657,18 +604,15 @@ def main():
                         if failed > 0:
                             st.error(f"Failed to upload {failed} projects")
                         
-                        # Show total number of projects after upload
                         total_projects = len(data_manager.get_user_projects(st.session_state.user_id))
                         st.info(f"Total projects in database: {total_projects}")
             
             except Exception as e:
                 st.error(f"Error processing file: {str(e)}")
         
-        # Display column information
         with st.expander("CSV Format Information"):
             st.markdown("""
-            ### Required Columns:
-            Your CSV file should include the following columns:
+            ##Your CSV file should include the following columns:
             
             1. Basic Project Information:
                - project_id
