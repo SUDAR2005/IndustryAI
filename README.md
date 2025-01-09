@@ -1,55 +1,67 @@
-# IndustryAI
+# Green Finance Optimization Platform
 
-1. System Architecture Overview:
-- Backend: Python-based microservices architecture
-- Frontend: React-based dashboard
-- Database: PostgreSQL for structured data, MongoDB for documents
-- Cloud Infrastructure: AWS/Azure for scalability
+## Overview
+The Green Finance Optimization Platform is a machine learning-powered web application designed to help users evaluate, analyze, and optimize sustainable investment projects. The platform provides advanced tools for data analysis, project scoring, anomaly detection, portfolio optimization, and ESG (Environmental, Social, and Governance) insights.
 
-2. Data Collection Implementation: (To Do: search source)
-- Created DataCollector class to:
-  - Interface with various APIs (government, NGO databases)
-  - Handle data validation and cleaning
-  - Store standardized data format
-- Uses async operations for efficient data gathering
-- Implements retry mechanisms for API failures
+## Features
+- **User Authentication**: Secure signup and login system using hashed passwords.
+- **Project Dashboard**: Visualize key project metrics, such as total investment, ROI, carbon reduction, and ESG scores.
+- **ML Insights**:
+  - Sentiment analysis of project descriptions.
+  - Project clustering based on PCA and K-Means.
+  - Anomaly detection using Isolation Forest.
+  - Feature importance analysis.
+  - Portfolio optimization for investments.
+- **Data Upload**: Import projects via CSV with extensive data validation.
+- **Interactive Visualizations**: 3D scatter plots, bar charts, and more using Plotly.
 
-3. Project Scoring System: (To Do: Fix data considered)
-- Project Scorer class implements:
-  - Environmental impact calculation using emissions data
-  - Social impact assessment using NLP on project documents
-  - Governance scoring based on compliance metrics
-- Uses transformer-based NLP models for document analysis
-- Implements weighted scoring system for different factors
+## Technologies Used
+- **Frontend**: Streamlit for the user interface.
+- **Backend**: MongoDB for data storage.
+- **Machine Learning**:
+  - Scikit-learn for preprocessing, anomaly detection, and clustering.
+  - Transformers for sentiment analysis.
+  - TensorFlow for future extensibility.
+- **Visualization**: Plotly for interactive dashboards.
 
-4. Optimization Engine: (Study this completely)
-- Optimization Engine class features:
-  - Linear programming solver for portfolio optimization
-  - Risk-adjusted return calculations
-  - Budget constraint handling
-  - Diversity requirements implementation
-- Uses PuLP for optimization problems
-- Handles multiple constraint types simultaneously
+## Installation
 
-5. Risk Prediction:
-- RiskPredictor class implements:
-  - Deep learning model for risk assessment
-  - Historical data analysis
-  - Climate risk integration
-  - Market volatility consideration
+### Prerequisites
+- Python 3.8+
+- MongoDB server
 
-6. Dashboard Implementation Steps:
-```javascript
-// Dashboard components needed:
-1. Project Overview Panel
-2. Portfolio Optimization View
-3. Risk Analysis Dashboard
-4. ESG Impact Visualizations
-```
+### Steps
+1. Clone the repository:
+   ```bash
+   git clone IndustryAi
+   cd IndustryAi
+   ```
+2. Create a virtual environment and activate it:
+   ```bash
+   python -m venv venv
+   #On Mac, use  source venv/bin/activate  # On Windows, use venv\Scripts\activate
+   ```
+3. Install the required dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Set up the `.env` file with the MongoDB connection string:
+   ```
+   MONGO_URI=mongodb://localhost:27017
+   ```
+5. Run the application:
+   ```bash
+   streamlit run ml-prototype.py
+   ```
 
-7. Integration Steps:
-a) Set up data pipelines
-b) Implement API endpoints
-c) Create authentication system
-d) Deploy microservices
-e) Set up monitoring
+## Usage
+1. **User Authentication**: Sign up or log in to access the platform.
+2. **Project Analysis**:
+   - Navigate to the "Dashboard" to view project metrics.
+   - Use clustering and feature importance tools for in-depth analysis.
+3. **Data Upload**:
+   - Go to "Update Database" to upload project data via CSV.
+   - Ensure the file matches the required format (see CSV format information in the app).
+4. **Portfolio Optimization**: Optimize investment allocation with machine learning insights.
+
+
